@@ -21,32 +21,36 @@ interface PromptTemplateState {
 
 interface PromptTemplateActions {
   initTemplates: () => void;
-  addTemplate: (params: CreatePromptTemplateParams) => string;
-  updateTemplate: (id: string, params: UpdatePromptTemplateParams) => void;
-  deleteTemplate: (id: string) => void;
-  toggleFavorite: (id: string) => void;
+  /** 返回新模板 id；持久化失败时返回 null，内存数据不变 */
+  addTemplate: (params: CreatePromptTemplateParams) => string | null;
+  /** 持久化成功返回 true；失败时保留改动前的模板并返回 false */
+  updateTemplate: (id: string, params: UpdatePromptTemplateParams) => boolean;
+  /** 持久化成功返回 true；失败时保留删除前的模板并返回 false */
+  deleteTemplate: (id: string) => boolean;
+  /** 持久化成功返回 true；失败时恢复原来的收藏状态并返回 false */
+  toggleFavorite: (id: string) => boolean;
   setSelectedCategory: (category: string | null) => void;
   setSearchQuery: (query: string) => void;
   setShowFavoritesOnly: (show: boolean) => void;
-  resetToDefaults: () => void;
+  resetToDefaults: () => boolean;
   getFilteredTemplates: () => PromptTemplate[];
   getCategories: () => string[];
 }
 
 type PromptTemplateStore = PromptTemplateState & PromptTemplateActions;
 
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-const debouncedSave = (templates: PromptTemplate[]) => {
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
+/**
+ * 先落盘、落盘成功后才更新内存。
+ * 这样存储失败时调用方仍持有上一份数据，编辑器也不会被清空。
+ */
+const persistTemplates = (templates: PromptTemplate[]): boolean => {
+  try {
+    savePromptTemplates(templates);
+    return true;
+  } catch (error) {
+    console.error('Failed to save prompt templates:', error);
+    return false;
   }
-  saveTimeout = setTimeout(() => {
-    try {
-      savePromptTemplates(templates);
-    } catch (error) {
-      console.error('Failed to save prompt templates:', error);
-    }
-  }, 300);
 };
 
 export const usePromptTemplateStore = create<PromptTemplateStore>((set, get) => ({
@@ -76,51 +80,60 @@ export const usePromptTemplateStore = create<PromptTemplateStore>((set, get) => 
       updatedAt: now,
     };
 
-    set((state) => {
-      const templates = [newTemplate, ...state.templates];
-      debouncedSave(templates);
-      return { templates };
-    });
+    const templates = [newTemplate, ...get().templates];
+    if (!persistTemplates(templates)) {
+      return null;
+    }
 
+    set({ templates });
     return id;
   },
 
   updateTemplate: (id, params) => {
-    set((state) => {
-      const templates = state.templates.map((t) => {
-        if (t.id !== id) return t;
-        return {
-          ...t,
-          ...params,
-          updatedAt: Date.now(),
-        };
-      });
-      debouncedSave(templates);
-      return { templates };
+    const previousTemplates = get().templates;
+    const templates = previousTemplates.map((t) => {
+      if (t.id !== id) return t;
+      return {
+        ...t,
+        ...params,
+        updatedAt: Date.now(),
+      };
     });
+
+    if (!persistTemplates(templates)) {
+      // 落盘失败：内存保持上一份，调用方可据此保持弹窗打开并提示
+      return false;
+    }
+
+    set({ templates });
+    return true;
   },
 
   deleteTemplate: (id) => {
-    set((state) => {
-      const templates = state.templates.filter((t) => t.id !== id);
-      debouncedSave(templates);
-      return { templates };
-    });
+    const templates = get().templates.filter((t) => t.id !== id);
+    if (!persistTemplates(templates)) {
+      return false;
+    }
+    set({ templates });
+    return true;
   },
 
   toggleFavorite: (id) => {
-    set((state) => {
-      const templates = state.templates.map((t) => {
-        if (t.id !== id) return t;
-        return {
-          ...t,
-          isFavorite: !t.isFavorite,
-          updatedAt: Date.now(),
-        };
-      });
-      debouncedSave(templates);
-      return { templates };
+    const previousTemplates = get().templates;
+    const templates = previousTemplates.map((t) => {
+      if (t.id !== id) return t;
+      return {
+        ...t,
+        isFavorite: !t.isFavorite,
+        updatedAt: Date.now(),
+      };
     });
+
+    if (!persistTemplates(templates)) {
+      return false;
+    }
+    set({ templates });
+    return true;
   },
 
   setSelectedCategory: (category) => {
@@ -136,8 +149,14 @@ export const usePromptTemplateStore = create<PromptTemplateStore>((set, get) => 
   },
 
   resetToDefaults: () => {
-    const templates = resetPromptTemplates();
-    set({ templates, selectedCategory: null, searchQuery: '', showFavoritesOnly: false });
+    try {
+      const templates = resetPromptTemplates();
+      set({ templates, selectedCategory: null, searchQuery: '', showFavoritesOnly: false });
+      return true;
+    } catch (error) {
+      console.error('Failed to reset prompt templates:', error);
+      return false;
+    }
   },
 
   getFilteredTemplates: () => {

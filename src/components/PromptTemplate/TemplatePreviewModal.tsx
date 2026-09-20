@@ -1,4 +1,4 @@
-import { Modal, Tag, Button, Space } from 'antd';
+import { Modal, Tag, Button, Space, message } from 'antd';
 import { StarOutlined, StarFilled, EditOutlined, CopyOutlined } from '@ant-design/icons';
 import type { PromptTemplate } from '../../types';
 import './TemplatePreviewModal.css';
@@ -22,6 +22,16 @@ export function TemplatePreviewModal({
 }: TemplatePreviewModalProps) {
   if (!template) return null;
 
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(template.content);
+      message.success('已复制');
+    } catch (error) {
+      console.error('Failed to copy template content:', error);
+      message.error('复制失败，请手动复制');
+    }
+  };
+
   return (
     <Modal
       title={
@@ -41,7 +51,7 @@ export function TemplatePreviewModal({
           >
             {template.isFavorite ? '取消收藏' : '收藏'}
           </Button>
-          <Button icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(template.content)}>
+          <Button icon={<CopyOutlined />} onClick={handleCopy}>
             复制内容
           </Button>
           <Button icon={<EditOutlined />} onClick={() => onEdit(template)}>

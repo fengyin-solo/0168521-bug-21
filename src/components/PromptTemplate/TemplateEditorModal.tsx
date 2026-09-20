@@ -7,35 +7,36 @@ interface TemplateEditorModalProps {
   open: boolean;
   template: PromptTemplate | null;
   onClose: () => void;
-  onSave: (params: CreatePromptTemplateParams) => void;
+  /** 返回 true 表示保存成功（弹窗关闭）；false 表示保存失败，保留弹窗与表单 */
+  onSave: (params: CreatePromptTemplateParams) => boolean;
 }
 
 export function TemplateEditorModal({ open, template, onClose, onSave }: TemplateEditorModalProps) {
   const [form] = Form.useForm();
 
   useEffect(() => {
-    if (open) {
-      if (template) {
-        form.setFieldsValue({
-          name: template.name,
-          description: template.description,
-          category: template.category,
-          content: template.content,
-        });
-      } else {
-        form.resetFields();
-        form.setFieldsValue({
-          category: '通用',
-        });
-      }
+    if (!open) return;
+    // 先整体重置，避免 undefined 字段被 setFieldsValue 跳过而残留上一份的值
+    form.resetFields();
+    if (template) {
+      form.setFieldsValue({
+        name: template.name,
+        description: template.description,
+        category: template.category,
+        content: template.content,
+      });
+    } else {
+      form.setFieldsValue({ category: '通用' });
     }
-  }, [open, template, form]);
+    // 仅在打开或编辑目标切换时同步，编辑期间外部数据变化不顶掉用户输入
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, template?.id]);
 
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
-      onSave(values);
-      message.success(template ? '模板已更新' : '模板已创建');
+      const ok = onSave(values);
+      if (!ok) return; // 保存失败：保留表单与上一份数据，允许用户重试
       onClose();
     } catch {
       message.error('请填写完整信息');

@@ -20,7 +20,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { usePromptTemplateStore } from '../../stores';
-import type { PromptTemplate, CreatePromptTemplateParams } from '../../types';
+import type { CreatePromptTemplateParams } from '../../types';
 import { DEFAULT_CATEGORIES } from '../../types';
 import { TemplateCard } from './TemplateCard';
 import { TemplateEditorModal } from './TemplateEditorModal';
@@ -34,6 +34,9 @@ interface PromptTemplateLibraryProps {
 }
 
 export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTemplateLibraryProps) {
+  // 弹窗只记录 id，模板对象始终从 store 按 id 派生，
+  // 保证卡片、预览、编辑三处读到的是同一份最新数据。
+  const templates = usePromptTemplateStore((state) => state.templates);
   const {
     initialized,
     initTemplates,
@@ -53,15 +56,26 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
   } = usePromptTemplateStore();
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | null>(null);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewTemplate, setPreviewTemplate] = useState<PromptTemplate | null>(null);
+  const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null);
+  // 从预览进入编辑时记下，保存/取消后回到预览；从卡片或“新建”进入则不恢复
+  const [returnToPreviewId, setReturnToPreviewId] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && !initialized) {
       initTemplates();
     }
-  }, [open, initialized]);
+  }, [open, initialized, initTemplates]);
+
+  const editingTemplate =
+    editingTemplateId != null
+      ? templates.find((t) => t.id === editingTemplateId) ?? null
+      : null;
+  const previewTemplate =
+    previewTemplateId != null
+      ? templates.find((t) => t.id === previewTemplateId) ?? null
+      : null;
 
   const filteredTemplates = getFilteredTemplates();
   const categories = getCategories();
@@ -71,34 +85,98 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
     message.success('模板已应用');
   };
 
-  const handleEditTemplate = (template: PromptTemplate) => {
-    setEditingTemplate(template);
-    setPreviewOpen(false);
+  const handleEditTemplate = (templateId: string) => {
+    setEditingTemplateId(templateId);
+    setEditorOpen(true);
+    if (previewOpen) {
+      setReturnToPreviewId(templateId);
+      setPreviewOpen(false);
+    }
+  };
+
+  const handleCreateTemplate = () => {
+    setEditingTemplateId(null);
+    setReturnToPreviewId(null);
     setEditorOpen(true);
   };
 
   const handleSaveTemplate = (params: CreatePromptTemplateParams) => {
-    if (editingTemplate) {
-      updateTemplate(editingTemplate.id, params);
+    if (editingTemplateId) {
+      const ok = updateTemplate(editingTemplateId, params);
+      if (!ok) {
+        // 落盘失败：不要关弹窗、不要清表单，上一份数据仍在 store 中
+        message.error('模板保存失败，原有内容已保留，请稍后重试');
+        return false;
+      }
+      message.success('模板已更新');
     } else {
-      addTemplate(params);
+      const newId = addTemplate(params);
+      if (!newId) {
+        message.error('模板创建失败，请稍后重试');
+        return false;
+      }
+      message.success('模板已创建');
     }
-    setEditingTemplate(null);
+    return true;
+  };
+
+  const closeEditor = () => {
+    setEditorOpen(false);
+    setEditingTemplateId(null);
+    if (returnToPreviewId) {
+      // 回到之前的预览弹窗，展示的是 store 中的最新数据
+      setPreviewTemplateId(returnToPreviewId);
+      setPreviewOpen(true);
+      setReturnToPreviewId(null);
+    }
   };
 
   const handleDeleteTemplate = (id: string) => {
-    deleteTemplate(id);
-    message.success('模板已删除');
+    const ok = deleteTemplate(id);
+    if (ok) {
+      message.success('模板已删除');
+      if (previewTemplateId === id) {
+        setPreviewOpen(false);
+        setPreviewTemplateId(null);
+      }
+      if (editingTemplateId === id) {
+        setEditorOpen(false);
+        setEditingTemplateId(null);
+      }
+    } else {
+      message.error('删除失败，模板已保留，请稍后重试');
+    }
   };
 
-  const handlePreviewTemplate = (template: PromptTemplate) => {
-    setPreviewTemplate(template);
+  const handleToggleFavorite = (id: string) => {
+    const ok = toggleFavorite(id);
+    if (!ok) {
+      message.error('收藏状态更新失败，请稍后重试');
+    }
+  };
+
+  const handlePreviewTemplate = (templateId: string) => {
+    setReturnToPreviewId(null);
+    setPreviewTemplateId(templateId);
     setPreviewOpen(true);
   };
 
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewTemplateId(null);
+  };
+
   const handleReset = () => {
-    resetToDefaults();
-    message.success('已重置为默认模板');
+    const ok = resetToDefaults();
+    if (ok) {
+      message.success('已重置为默认模板');
+      setPreviewOpen(false);
+      setPreviewTemplateId(null);
+      setEditorOpen(false);
+      setEditingTemplateId(null);
+    } else {
+      message.error('重置失败，当前模板已保留');
+    }
   };
 
   const allCategories = Array.from(new Set([...DEFAULT_CATEGORIES, ...categories])).sort();
@@ -119,7 +197,7 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
                 重置
               </Button>
             </Tooltip>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditorOpen(true)}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTemplate}>
               新建模板
             </Button>
           </Space>
@@ -175,10 +253,10 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
                   <TemplateCard
                     template={template}
                     onUse={handleUseTemplate}
-                    onEdit={handleEditTemplate}
+                    onEdit={(t) => handleEditTemplate(t.id)}
                     onDelete={handleDeleteTemplate}
-                    onToggleFavorite={toggleFavorite}
-                    onPreview={handlePreviewTemplate}
+                    onToggleFavorite={handleToggleFavorite}
+                    onPreview={(t) => handlePreviewTemplate(t.id)}
                   />
                 </Col>
               ))}
@@ -190,23 +268,17 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
       <TemplateEditorModal
         open={editorOpen}
         template={editingTemplate}
-        onClose={() => {
-          setEditorOpen(false);
-          setEditingTemplate(null);
-        }}
+        onClose={closeEditor}
         onSave={handleSaveTemplate}
       />
 
       <TemplatePreviewModal
         open={previewOpen}
         template={previewTemplate}
-        onClose={() => {
-          setPreviewOpen(false);
-          setPreviewTemplate(null);
-        }}
+        onClose={closePreview}
         onUse={handleUseTemplate}
-        onEdit={handleEditTemplate}
-        onToggleFavorite={toggleFavorite}
+        onEdit={(t) => handleEditTemplate(t.id)}
+        onToggleFavorite={handleToggleFavorite}
       />
     </>
   );
