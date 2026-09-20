@@ -21,32 +21,38 @@ interface PromptTemplateState {
 
 interface PromptTemplateActions {
   initTemplates: () => void;
-  addTemplate: (params: CreatePromptTemplateParams) => string;
-  updateTemplate: (id: string, params: UpdatePromptTemplateParams) => void;
-  deleteTemplate: (id: string) => void;
-  toggleFavorite: (id: string) => void;
+  addTemplate: (params: CreatePromptTemplateParams) => string | null;
+  updateTemplate: (id: string, params: UpdatePromptTemplateParams) => boolean;
+  deleteTemplate: (id: string) => boolean;
+  toggleFavorite: (id: string) => boolean;
   setSelectedCategory: (category: string | null) => void;
   setSearchQuery: (query: string) => void;
   setShowFavoritesOnly: (show: boolean) => void;
-  resetToDefaults: () => void;
+  resetToDefaults: () => boolean;
   getFilteredTemplates: () => PromptTemplate[];
   getCategories: () => string[];
 }
 
 type PromptTemplateStore = PromptTemplateState & PromptTemplateActions;
 
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-const debouncedSave = (templates: PromptTemplate[]) => {
-  if (saveTimeout) {
-    clearTimeout(saveTimeout);
+const persistTemplates = (templates: PromptTemplate[]) => {
+  savePromptTemplates(templates);
+};
+
+const commitTemplates = (
+  nextTemplates: PromptTemplate[],
+  previousTemplates: PromptTemplate[],
+  set: (partial: Partial<PromptTemplateState>) => void,
+) => {
+  try {
+    persistTemplates(nextTemplates);
+    set({ templates: nextTemplates });
+    return true;
+  } catch (error) {
+    console.error('Failed to save prompt templates:', error);
+    set({ templates: previousTemplates });
+    return false;
   }
-  saveTimeout = setTimeout(() => {
-    try {
-      savePromptTemplates(templates);
-    } catch (error) {
-      console.error('Failed to save prompt templates:', error);
-    }
-  }, 300);
 };
 
 export const usePromptTemplateStore = create<PromptTemplateStore>((set, get) => ({
@@ -76,51 +82,62 @@ export const usePromptTemplateStore = create<PromptTemplateStore>((set, get) => 
       updatedAt: now,
     };
 
-    set((state) => {
-      const templates = [newTemplate, ...state.templates];
-      debouncedSave(templates);
-      return { templates };
-    });
+    const previousTemplates = get().templates;
+    const nextTemplates = [newTemplate, ...previousTemplates];
+    const saved = commitTemplates(nextTemplates, previousTemplates, set);
 
-    return id;
+    return saved ? id : null;
   },
 
   updateTemplate: (id, params) => {
-    set((state) => {
-      const templates = state.templates.map((t) => {
-        if (t.id !== id) return t;
-        return {
-          ...t,
-          ...params,
-          updatedAt: Date.now(),
-        };
-      });
-      debouncedSave(templates);
-      return { templates };
+    const previousTemplates = get().templates;
+    const templateExists = previousTemplates.some((t) => t.id === id);
+
+    if (!templateExists) {
+      return false;
+    }
+
+    const nextTemplates = previousTemplates.map((t) => {
+      if (t.id !== id) return t;
+      return {
+        ...t,
+        ...params,
+        updatedAt: Date.now(),
+      };
     });
+
+    return commitTemplates(nextTemplates, previousTemplates, set);
   },
 
   deleteTemplate: (id) => {
-    set((state) => {
-      const templates = state.templates.filter((t) => t.id !== id);
-      debouncedSave(templates);
-      return { templates };
-    });
+    const previousTemplates = get().templates;
+    const nextTemplates = previousTemplates.filter((t) => t.id !== id);
+
+    if (nextTemplates.length === previousTemplates.length) {
+      return false;
+    }
+
+    return commitTemplates(nextTemplates, previousTemplates, set);
   },
 
   toggleFavorite: (id) => {
-    set((state) => {
-      const templates = state.templates.map((t) => {
-        if (t.id !== id) return t;
-        return {
-          ...t,
-          isFavorite: !t.isFavorite,
-          updatedAt: Date.now(),
-        };
-      });
-      debouncedSave(templates);
-      return { templates };
+    const previousTemplates = get().templates;
+    const templateExists = previousTemplates.some((t) => t.id === id);
+
+    if (!templateExists) {
+      return false;
+    }
+
+    const nextTemplates = previousTemplates.map((t) => {
+      if (t.id !== id) return t;
+      return {
+        ...t,
+        isFavorite: !t.isFavorite,
+        updatedAt: Date.now(),
+      };
     });
+
+    return commitTemplates(nextTemplates, previousTemplates, set);
   },
 
   setSelectedCategory: (category) => {
@@ -136,8 +153,27 @@ export const usePromptTemplateStore = create<PromptTemplateStore>((set, get) => 
   },
 
   resetToDefaults: () => {
-    const templates = resetPromptTemplates();
-    set({ templates, selectedCategory: null, searchQuery: '', showFavoritesOnly: false });
+    const previousState = get();
+
+    try {
+      const templates = resetPromptTemplates();
+      set({
+        templates,
+        selectedCategory: null,
+        searchQuery: '',
+        showFavoritesOnly: false,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to reset prompt templates:', error);
+      set({
+        templates: previousState.templates,
+        selectedCategory: previousState.selectedCategory,
+        searchQuery: previousState.searchQuery,
+        showFavoritesOnly: previousState.showFavoritesOnly,
+      });
+      return false;
+    }
   },
 
   getFilteredTemplates: () => {

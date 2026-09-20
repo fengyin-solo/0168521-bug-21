@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { Modal, Form, Input, Select, message } from 'antd';
+import { Modal, Form, Input, Select } from 'antd';
 import type { PromptTemplate, CreatePromptTemplateParams } from '../../types';
 import { DEFAULT_CATEGORIES } from '../../types';
 
@@ -7,38 +6,29 @@ interface TemplateEditorModalProps {
   open: boolean;
   template: PromptTemplate | null;
   onClose: () => void;
-  onSave: (params: CreatePromptTemplateParams) => void;
+  afterClose: () => void;
+  onSave: (params: CreatePromptTemplateParams) => boolean;
 }
 
-export function TemplateEditorModal({ open, template, onClose, onSave }: TemplateEditorModalProps) {
+export function TemplateEditorModal({ open, template, onClose, afterClose, onSave }: TemplateEditorModalProps) {
   const [form] = Form.useForm();
-
-  useEffect(() => {
-    if (open) {
-      if (template) {
-        form.setFieldsValue({
-          name: template.name,
-          description: template.description,
-          category: template.category,
-          content: template.content,
-        });
-      } else {
-        form.resetFields();
-        form.setFieldsValue({
-          category: '通用',
-        });
+  const initialValues = template
+    ? {
+        name: template.name,
+        description: template.description,
+        category: template.category,
+        content: template.content,
       }
-    }
-  }, [open, template, form]);
+    : {
+        category: '通用',
+      };
 
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
       onSave(values);
-      message.success(template ? '模板已更新' : '模板已创建');
-      onClose();
     } catch {
-      message.error('请填写完整信息');
+      // 校验错误已经由表单项展示，保持弹窗和当前输入不变。
     }
   };
 
@@ -48,13 +38,18 @@ export function TemplateEditorModal({ open, template, onClose, onSave }: Templat
       open={open}
       onOk={handleOk}
       onCancel={onClose}
+      afterClose={afterClose}
       width={600}
       okText="保存"
       cancelText="取消"
+      destroyOnClose
     >
       <Form
+        key={template?.id ?? 'new'}
         form={form}
         layout="vertical"
+        initialValues={initialValues}
+        preserve={false}
         style={{ marginTop: 16 }}
       >
         <Form.Item

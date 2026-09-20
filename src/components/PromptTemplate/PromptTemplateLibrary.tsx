@@ -37,6 +37,7 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
   const {
     initialized,
     initTemplates,
+    templates,
     addTemplate,
     updateTemplate,
     deleteTemplate,
@@ -53,9 +54,9 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
   } = usePromptTemplateStore();
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | null>(null);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewTemplate, setPreviewTemplate] = useState<PromptTemplate | null>(null);
+  const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && !initialized) {
@@ -65,6 +66,12 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
 
   const filteredTemplates = getFilteredTemplates();
   const categories = getCategories();
+  const editingTemplate = editingTemplateId
+    ? templates.find((template) => template.id === editingTemplateId) ?? null
+    : null;
+  const previewTemplate = previewTemplateId
+    ? templates.find((template) => template.id === previewTemplateId) ?? null
+    : null;
 
   const handleUseTemplate = (content: string) => {
     onUseTemplate(content);
@@ -72,33 +79,50 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
   };
 
   const handleEditTemplate = (template: PromptTemplate) => {
-    setEditingTemplate(template);
-    setPreviewOpen(false);
+    setEditingTemplateId(template.id);
     setEditorOpen(true);
   };
 
   const handleSaveTemplate = (params: CreatePromptTemplateParams) => {
-    if (editingTemplate) {
-      updateTemplate(editingTemplate.id, params);
+    const saved = editingTemplateId
+      ? updateTemplate(editingTemplateId, params)
+      : addTemplate(params) !== null;
+
+    if (saved) {
+      message.success(editingTemplateId ? '模板已更新' : '模板已创建');
+      setEditorOpen(false);
     } else {
-      addTemplate(params);
+      message.error('模板保存失败，已恢复为修改前的内容');
     }
-    setEditingTemplate(null);
+
+    return saved;
   };
 
   const handleDeleteTemplate = (id: string) => {
-    deleteTemplate(id);
-    message.success('模板已删除');
+    if (deleteTemplate(id)) {
+      message.success('模板已删除');
+    } else {
+      message.error('模板删除失败，已恢复为删除前的内容');
+    }
+  };
+
+  const handleToggleFavorite = (id: string) => {
+    if (!toggleFavorite(id)) {
+      message.error('收藏状态保存失败，已恢复为上一份内容');
+    }
   };
 
   const handlePreviewTemplate = (template: PromptTemplate) => {
-    setPreviewTemplate(template);
+    setPreviewTemplateId(template.id);
     setPreviewOpen(true);
   };
 
   const handleReset = () => {
-    resetToDefaults();
-    message.success('已重置为默认模板');
+    if (resetToDefaults()) {
+      message.success('已重置为默认模板');
+    } else {
+      message.error('重置失败，已恢复为重置前的内容');
+    }
   };
 
   const allCategories = Array.from(new Set([...DEFAULT_CATEGORIES, ...categories])).sort();
@@ -119,7 +143,10 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
                 重置
               </Button>
             </Tooltip>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditorOpen(true)}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+              setEditingTemplateId(null);
+              setEditorOpen(true);
+            }}>
               新建模板
             </Button>
           </Space>
@@ -177,7 +204,7 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
                     onUse={handleUseTemplate}
                     onEdit={handleEditTemplate}
                     onDelete={handleDeleteTemplate}
-                    onToggleFavorite={toggleFavorite}
+                    onToggleFavorite={handleToggleFavorite}
                     onPreview={handlePreviewTemplate}
                   />
                 </Col>
@@ -190,23 +217,19 @@ export function PromptTemplateLibrary({ open, onClose, onUseTemplate }: PromptTe
       <TemplateEditorModal
         open={editorOpen}
         template={editingTemplate}
-        onClose={() => {
-          setEditorOpen(false);
-          setEditingTemplate(null);
-        }}
+        onClose={() => setEditorOpen(false)}
+        afterClose={() => setEditingTemplateId(null)}
         onSave={handleSaveTemplate}
       />
 
       <TemplatePreviewModal
         open={previewOpen}
         template={previewTemplate}
-        onClose={() => {
-          setPreviewOpen(false);
-          setPreviewTemplate(null);
-        }}
+        onClose={() => setPreviewOpen(false)}
+        afterClose={() => setPreviewTemplateId(null)}
         onUse={handleUseTemplate}
         onEdit={handleEditTemplate}
-        onToggleFavorite={toggleFavorite}
+        onToggleFavorite={handleToggleFavorite}
       />
     </>
   );

@@ -4,9 +4,9 @@ import {
   StarFilled,
   EditOutlined,
   DeleteOutlined,
-  CopyOutlined,
 } from '@ant-design/icons';
 import type { PromptTemplate } from '../../types';
+import { CopyButton } from '../Common';
 import './TemplateCard.css';
 
 interface TemplateCardProps {
@@ -46,16 +46,12 @@ export function TemplateCard({
             }}
           />
         </Tooltip>,
-        <Tooltip key="copy" title="复制内容">
-          <Button
-            type="text"
-            icon={<CopyOutlined />}
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(template.content);
-            }}
-          />
-        </Tooltip>,
+        <CopyButton
+          key="copy"
+          text={template.content}
+          successText="内容已复制"
+          stopPropagation
+        />,
         <Tooltip key="edit" title="编辑">
           <Button
             type="text"
@@ -71,6 +67,7 @@ export function TemplateCard({
             title="确认删除"
             description="确定要删除这个模板吗？"
             onConfirm={() => onDelete(template.id)}
+            onPopupClick={(e) => e.stopPropagation()}
             okText="删除"
             cancelText="取消"
           >
@@ -99,10 +96,8 @@ export function TemplateCard({
         </p>
       )}
 
-      <div className="template-content-preview">
-        {template.content.length > 100
-          ? `${template.content.substring(0, 100)}...`
-          : template.content}
+      <div className="template-content-preview" title={template.content}>
+        {template.content}
       </div>
 
       <Button
